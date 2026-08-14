@@ -17,6 +17,19 @@ fail() {
   exit 1
 }
 
+verify_writable_directory() {
+  local directory="$1"
+  local probe="${directory}/.hfs-write-probe-${BASHPID}-${RANDOM}"
+  local payload="dsh-hfs-write-probe"
+
+  test ! -e "${probe}" || fail "write probe collision at ${probe}"
+  printf '%s\n' "${payload}" >"${probe}" \
+    || fail "cannot write to ${directory}"
+  test "$(tr -d '\r\n' <"${probe}")" = "${payload}" \
+    || fail "cannot read back a write probe from ${directory}"
+  rm -- "${probe}" || fail "cannot remove a write probe from ${directory}"
+}
+
 terminate_children() {
   local pid
   for pid in "${children[@]:-}"; do
@@ -76,8 +89,8 @@ mkdir -p \
   /tmp/dsh-nginx/fastcgi \
   /tmp/dsh-nginx/uwsgi \
   /tmp/dsh-nginx/scgi
-test -w "${data_root}" || fail "${data_root} is not writable"
-test -w "${workspace}" || fail "${workspace} is not writable"
+verify_writable_directory "${data_root}"
+verify_writable_directory "${workspace}"
 
 printf '%s\n' "${ADMIN_PASSWORD}" \
   | htpasswd -imc "${nginx_auth_file}" "${ADMIN_USERNAME}" >/dev/null

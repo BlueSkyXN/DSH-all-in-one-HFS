@@ -99,7 +99,7 @@ visibility:     protected Space / private bucket
 
 Space 必须将私有 Bucket 读写挂载到 `/data`。启动脚本以 UID/GID `1000` 运行，并在没有真实 mount、目录不可写或版本不匹配时失败关闭。
 
-首次部署先创建 Bucket、挂载 `/data`，再写入非敏感目录种子：
+首次部署先创建 Bucket、挂载 `/data`，再为 `dsh/`、`dsh/home/` 和 `dsh/workspace/` 写入非敏感目录种子：
 
 ```bash
 ./scripts/prepare-bucket-prefix.sh --apply

@@ -54,6 +54,7 @@ for line in ("sdk: docker", "app_port: 7860", "license: gpl-3.0"):
 dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
 entrypoint = (root / "entrypoint.sh").read_text(encoding="utf-8")
 nginx = (root / "nginx.conf").read_text(encoding="utf-8")
+bucket_script = (root / "scripts/prepare-bucket-prefix.sh").read_text(encoding="utf-8")
 
 for snippet in (
     "@deepseek-ai/dsh@${DSH_VERSION}",
@@ -70,6 +71,7 @@ for snippet in (
     '--trusted-host "${trusted_host}"',
     'htpasswd -imc',
     'nginx -c /etc/nginx/nginx.conf',
+    'verify_writable_directory "${workspace}"',
 ):
     if snippet not in entrypoint:
         raise SystemExit(f"entrypoint.sh is missing runtime contract: {snippet}")
@@ -83,6 +85,14 @@ for snippet in (
 ):
     if snippet not in nginx:
         raise SystemExit(f"nginx.conf is missing proxy contract: {snippet}")
+
+for snippet in (
+    '${data_prefix}/.hfs-bucket-seed',
+    '${data_prefix}/home/.hfs-bucket-seed',
+    '${data_prefix}/workspace/.hfs-bucket-seed',
+):
+    if snippet not in bucket_script:
+        raise SystemExit(f"prepare-bucket-prefix.sh is missing seed path: {snippet}")
 
 print("static contract: PASS")
 PY
