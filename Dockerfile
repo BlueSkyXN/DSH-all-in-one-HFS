@@ -1,5 +1,27 @@
 # syntax=docker/dockerfile:1.7
 
+FROM node:24-bookworm-slim AS dsh-build
+
+ARG DSH_VERSION=0.1.0-rc.6
+
+ENV XDG_CACHE_HOME=/tmp/dsh-build-cache \
+    NPM_CONFIG_CACHE=/tmp/npm-cache \
+    PATH=/opt/dsh/node_modules/.bin:$PATH
+
+WORKDIR /opt/dsh
+
+COPY package.json package-lock.json ./
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm ci --omit=dev --no-audit --no-fund \
+    && test "$(dsh --version)" = "${DSH_VERSION}" \
+    && npm cache clean --force
+
 FROM node:24-bookworm-slim
 
 ARG DSH_VERSION=0.1.0-rc.6
@@ -25,8 +47,6 @@ ENV NODE_ENV=production \
 
 WORKDIR /opt/dsh
 
-COPY package.json package-lock.json ./
-
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       apache2-utils \
@@ -40,9 +60,6 @@ RUN apt-get update \
       tini \
       util-linux \
     && rm -rf /var/lib/apt/lists/* \
-    && npm ci --omit=dev --no-audit --no-fund \
-    && test "$(dsh --version)" = "${DSH_VERSION}" \
-    && npm cache clean --force \
     && install -d -o node -g node -m 0700 \
       /data \
       /data/dsh \
@@ -52,11 +69,13 @@ RUN apt-get update \
       /tmp/npm-cache \
       /tmp/dsh-nginx
 
+COPY --from=dsh-build /opt/dsh /opt/dsh
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY entrypoint.sh /usr/local/bin/dsh-hfs-entrypoint
 
 RUN chmod 0644 /etc/nginx/nginx.conf \
-    && chmod 0755 /usr/local/bin/dsh-hfs-entrypoint
+    && chmod 0755 /usr/local/bin/dsh-hfs-entrypoint \
+    && test "$(dsh --version)" = "${DSH_VERSION}"
 
 VOLUME ["/data"]
 USER node
