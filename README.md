@@ -60,6 +60,8 @@ dsh web 127.0.0.1:3080
 
 Nginx 保留外部 `Host`，并通过 `--trusted-host` 将唯一的 `hf.space` authority 交给上游 DNS-rebinding / same-origin 防护。包装层不会重写 `Host`、`Origin` 或 `Referer` 去绕过上游的远程限制。
 
+`tini` 只把停止信号交给监督 shell；shell 再分别通知 Nginx 和 `dsh` 并等待退出，避免上游把重复的第二个信号解释为强制终止，从而跳过会话 flush。
+
 ## Space 配置
 
 必需：

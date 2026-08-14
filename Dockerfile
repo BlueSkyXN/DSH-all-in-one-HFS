@@ -86,5 +86,5 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
     CMD ["curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3080/"]
 
-ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/dsh-hfs-entrypoint"]

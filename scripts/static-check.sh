@@ -61,7 +61,7 @@ for snippet in (
     "DSH_HOME=/data/dsh",
     "USER node",
     "EXPOSE 7860",
-    '["/usr/bin/tini", "-g", "--"]',
+    '["/usr/bin/tini", "--"]',
 ):
     if snippet not in dockerfile:
         raise SystemExit(f"Dockerfile is missing runtime contract: {snippet}")
