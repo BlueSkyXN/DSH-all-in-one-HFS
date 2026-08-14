@@ -1,0 +1,22 @@
+standard = "3.0"
+project = "dsh-all-in-one-hfs"
+space = "BlueSkyXN/DSH-all-in-one-HFS"
+
+project_class = "preview"
+target_role = "primary"
+sovereignty = "port"
+lane = "artifact"
+version_source = "tag"
+
+space_visibility = "protected"
+bucket_visibility = "private"
+
+env_file = "local/hfs-targets/production.env"
+local_only = ["HF_TOKEN", "GH_TOKEN"]
+secrets = ["ADMIN_PASSWORD"]
+optional_secrets = ["DEEPSEEK_API_KEY"]
+variables = ["ADMIN_USERNAME", "DSH_TRUSTED_HOST"]
+
+deviations = [
+  "business-package = The wrapper installs the upstream public npm release because DeepSeek Harness publishes the runnable Web application as @deepseek-ai/dsh rather than an OCI image.",
+]

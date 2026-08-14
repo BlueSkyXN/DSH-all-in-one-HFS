@@ -1,0 +1,10 @@
+{
+  "name": "dsh-all-in-one-hfs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hugging Face Docker Space wrapper for DeepSeek Harness",
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.6"
+  }
+}
