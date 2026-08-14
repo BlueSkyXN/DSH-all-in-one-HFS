@@ -70,10 +70,11 @@ RUN apt-get update \
       /tmp/dsh-nginx
 
 COPY --from=dsh-build /opt/dsh /opt/dsh
+COPY space.cordis.yml /opt/dsh-hfs/space.cordis.yml
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY entrypoint.sh /usr/local/bin/dsh-hfs-entrypoint
 
-RUN chmod 0644 /etc/nginx/nginx.conf \
+RUN chmod 0644 /opt/dsh-hfs/space.cordis.yml /etc/nginx/nginx.conf \
     && chmod 0755 /usr/local/bin/dsh-hfs-entrypoint \
     && test "$(dsh --version)" = "${DSH_VERSION}"
 

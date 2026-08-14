@@ -38,13 +38,22 @@ lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
 expected_version = "0.1.0-rc.6"
 if package.get("dependencies", {}).get("@deepseek-ai/dsh") != expected_version:
     raise SystemExit("package.json does not pin the expected dsh version")
+if package.get("dependencies", {}).get("@deepseek-ai/dsh-session-persistence-sqlite") != expected_version:
+    raise SystemExit("package.json does not pin the expected SQLite persistence version")
 if lock.get("packages", {}).get("", {}).get("dependencies", {}).get("@deepseek-ai/dsh") != expected_version:
     raise SystemExit("package-lock.json does not pin the expected dsh version")
+if lock.get("packages", {}).get("", {}).get("dependencies", {}).get("@deepseek-ai/dsh-session-persistence-sqlite") != expected_version:
+    raise SystemExit("package-lock.json does not pin the expected SQLite persistence version")
 dsh_lock = lock.get("packages", {}).get("node_modules/@deepseek-ai/dsh", {})
 if dsh_lock.get("version") != expected_version:
     raise SystemExit("package-lock.json resolved an unexpected dsh version")
 if dsh_lock.get("integrity") != "sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==":
     raise SystemExit("package-lock.json resolved an unexpected dsh integrity")
+sqlite_lock = lock.get("packages", {}).get("node_modules/@deepseek-ai/dsh-session-persistence-sqlite", {})
+if sqlite_lock.get("version") != expected_version:
+    raise SystemExit("package-lock.json resolved an unexpected SQLite persistence version")
+if sqlite_lock.get("integrity") != "sha512-0pHni+hKe+VkZiuEieCmetcZQJd7gaA6Iw1qp3yMH6T904r2AuzqjQDU4yAJfKErMTbstvcR2vIdMw89CScFdQ==":
+    raise SystemExit("package-lock.json resolved an unexpected SQLite persistence integrity")
 
 readme = (root / "README.md").read_text(encoding="utf-8")
 for line in ("sdk: docker", "app_port: 7860", "license: gpl-3.0"):
@@ -55,6 +64,7 @@ dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
 entrypoint = (root / "entrypoint.sh").read_text(encoding="utf-8")
 nginx = (root / "nginx.conf").read_text(encoding="utf-8")
 bucket_script = (root / "scripts/prepare-bucket-prefix.sh").read_text(encoding="utf-8")
+space_overlay = (root / "space.cordis.yml").read_text(encoding="utf-8")
 
 for snippet in (
     "@deepseek-ai/dsh@${DSH_VERSION}",
@@ -72,6 +82,8 @@ for snippet in (
     'htpasswd -imc',
     'nginx -c /etc/nginx/nginx.conf',
     'verify_writable_directory "${workspace}"',
+    '--patch "${space_overlay}"',
+    'ln -s "${sqlite_plugin}" "${sqlite_plugin_link}"',
 ):
     if snippet not in entrypoint:
         raise SystemExit(f"entrypoint.sh is missing runtime contract: {snippet}")
@@ -93,6 +105,17 @@ for snippet in (
 ):
     if snippet not in bucket_script:
         raise SystemExit(f"prepare-bucket-prefix.sh is missing seed path: {snippet}")
+
+for snippet in (
+    "id: session-persistence-jsonl",
+    "disabled: true",
+    "id: session-persistence-sqlite",
+    "name: '@deepseek-ai/dsh-session-persistence-sqlite'",
+    "path: !!js dshHomePath('sessions.sqlite')",
+    "journalMode: wal",
+):
+    if snippet not in space_overlay:
+        raise SystemExit(f"space.cordis.yml is missing persistence contract: {snippet}")
 
 print("static contract: PASS")
 PY

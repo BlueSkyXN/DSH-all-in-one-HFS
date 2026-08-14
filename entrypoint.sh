@@ -8,6 +8,9 @@ readonly internal_port="${DSH_INTERNAL_PORT:-3080}"
 readonly public_port="${PORT:-7860}"
 readonly trusted_host="${DSH_TRUSTED_HOST:-blueskyxn-dsh-all-in-one-hfs.hf.space}"
 readonly dsh_bin="/opt/dsh/node_modules/.bin/dsh"
+readonly sqlite_plugin="/opt/dsh/node_modules/@deepseek-ai/dsh-session-persistence-sqlite"
+readonly sqlite_plugin_link="${data_root}/profiles/node_modules/@deepseek-ai/dsh-session-persistence-sqlite"
+readonly space_overlay="/opt/dsh-hfs/space.cordis.yml"
 readonly nginx_auth_file="/tmp/dsh-nginx/htpasswd"
 
 children=()
@@ -52,6 +55,8 @@ trap handle_signal TERM INT
 test "$(id -u)" = "${expected_uid}" \
   || fail "runtime UID must be ${expected_uid} on Hugging Face Spaces"
 test -x "${dsh_bin}" || fail "the pinned dsh executable is missing"
+test -d "${sqlite_plugin}" || fail "the pinned SQLite persistence plugin is missing"
+test -f "${space_overlay}" || fail "the HFS deployment overlay is missing"
 test "$(${dsh_bin} --version)" = "${DSH_VERSION}" \
   || fail "installed dsh version does not match DSH_VERSION=${DSH_VERSION}"
 test "${data_root}" = "/data/dsh" \
@@ -92,6 +97,17 @@ mkdir -p \
 verify_writable_directory "${data_root}"
 verify_writable_directory "${workspace}"
 
+mkdir -p "$(dirname -- "${sqlite_plugin_link}")"
+if [[ -L "${sqlite_plugin_link}" ]]; then
+  test "$(readlink "${sqlite_plugin_link}")" = "${sqlite_plugin}" \
+    || fail "the SQLite persistence plugin link points outside the pinned install"
+elif [[ -e "${sqlite_plugin_link}" ]]; then
+  fail "the SQLite persistence plugin link path is occupied by a non-symlink"
+else
+  ln -s "${sqlite_plugin}" "${sqlite_plugin_link}" \
+    || fail "cannot expose the SQLite persistence plugin to the Web profile"
+fi
+
 printf '%s\n' "${ADMIN_PASSWORD}" \
   | htpasswd -imc "${nginx_auth_file}" "${ADMIN_USERNAME}" >/dev/null
 chmod 0600 "${nginx_auth_file}"
@@ -105,6 +121,7 @@ export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-/tmp/npm-cache}"
 cd "${workspace}"
 
 "${dsh_bin}" web \
+  --patch "${space_overlay}" \
   --port "${internal_port}" \
   --trusted-host "${trusted_host}" &
 dsh_pid=$!

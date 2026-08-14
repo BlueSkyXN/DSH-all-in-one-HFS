@@ -5,6 +5,7 @@
   "description": "Hugging Face Docker Space wrapper for DeepSeek Harness",
   "license": "GPL-3.0-only",
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.0-rc.6"
+    "@deepseek-ai/dsh": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-persistence-sqlite": "0.1.0-rc.6"
   }
 }

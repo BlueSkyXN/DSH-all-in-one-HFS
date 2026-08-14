@@ -1,0 +1,12 @@
+# HF Bucket mounts do not implement the POSIX hard-link publication required by
+# the default JSONL backend. Keep the upstream persistence seam and replace only
+# its provider with the upstream SQLite implementation.
+- id: session-persistence-jsonl
+  disabled: true
+
+- insert:
+    - id: session-persistence-sqlite
+      name: '@deepseek-ai/dsh-session-persistence-sqlite'
+      config:
+        path: !!js dshHomePath('sessions.sqlite')
+        journalMode: wal

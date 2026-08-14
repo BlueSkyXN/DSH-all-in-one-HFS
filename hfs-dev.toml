@@ -19,4 +19,5 @@ variables = ["ADMIN_USERNAME", "DSH_TRUSTED_HOST"]
 
 deviations = [
   "business-package = The wrapper installs the upstream public npm release because DeepSeek Harness publishes the runnable Web application as @deepseek-ai/dsh rather than an OCI image.",
+  "session-persistence = The HF bucket mount cannot satisfy the default JSONL backend's POSIX hard-link publication contract, so the wrapper selects the same upstream release's SQLite backend at /data/dsh/sessions.sqlite.",
 ]

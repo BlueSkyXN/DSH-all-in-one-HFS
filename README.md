@@ -51,7 +51,7 @@ dsh web 127.0.0.1:3080
 /data/dsh
   |- home/        持久化用户主目录
   |- profiles/    dsh 自动初始化的 profile 与插件状态
-  |- sessions/    会话及投影数据
+  |- sessions.sqlite  会话及投影数据
   |- settings.yaml / .credentials.yaml（由上游管理）
   `- workspace/   默认工作区
 ```
@@ -61,6 +61,8 @@ dsh web 127.0.0.1:3080
 Nginx 保留外部 `Host`，并通过 `--trusted-host` 将唯一的 `hf.space` authority 交给上游 DNS-rebinding / same-origin 防护。包装层不会重写 `Host`、`Origin` 或 `Referer` 去绕过上游的远程限制。
 
 `tini` 只把停止信号交给监督 shell；shell 再分别通知 Nginx 和 `dsh` 并等待退出，避免上游把重复的第二个信号解释为强制终止，从而跳过会话 flush。
+
+上游默认 JSONL persistence backend 首次发布日志时依赖 POSIX `link()` 硬链接与目录 `fsync`；HF Bucket mount 不提供这组语义。包装层通过 `space.cordis.yml` 只禁用该 provider，改用同一上游版本正式发布的 `@deepseek-ai/dsh-session-persistence-sqlite`，数据库为 `/data/dsh/sessions.sqlite`，其余 persistence seam、Web UI、Agent preset 和工具保持上游实现。
 
 ## Space 配置
 
@@ -95,6 +97,7 @@ sovereignty:    port
 lane:           artifact
 version_source: tag (npm package version)
 visibility:     protected Space / private bucket
+session store:  upstream SQLite backend at /data/dsh/sessions.sqlite
 ```
 
 ## 持久化约束
