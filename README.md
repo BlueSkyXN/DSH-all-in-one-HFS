@@ -52,11 +52,12 @@ dsh web 127.0.0.1:3080
 /data/dsh
   |- home/        持久化用户主目录
   |- profiles/    dsh 自动初始化的 profile 与插件状态
+  |- session-archive-v1/  会话 JSONL 的增量归档
   |- settings.yaml / .credentials.yaml（由上游管理）
   `- workspace/   默认工作区
 
 /tmp/dsh-sessions
-  `- 官方 JSONL 会话日志（容器本地，重启后丢失）
+  `- 官方 JSONL 会话日志（运行时权威存储）
 ```
 
 上游 CLI 会主动拒绝 `dsh web --host 0.0.0.0`，因为 Web Surface 可创建带 Bash 和文件工具的 Agent，直接暴露会形成远程代码执行入口。包装层因此保留上游 `127.0.0.1:3080` 监听，在前面增加一个必须通过 Basic Auth 的 Nginx 入口；WebSocket、SSE 和长请求经同一入口转发。
@@ -68,6 +69,8 @@ Nginx 保留外部 `Host`，并通过 `--trusted-host` 将唯一的 `hf.space` a
 `tini` 只把停止信号交给监督 shell；shell 再分别通知 Nginx 和 `dsh` 并等待退出，避免上游把重复的第二个信号解释为强制终止，从而跳过会话 flush。
 
 官方 0.2.2 版本只提供 JSONL Session persistence backend，并已移除 SQLite 会话后端。Linux 上的 JSONL 首次发布依赖 POSIX `link()` 硬链接与目录 `fsync`；HF Bucket mount 不提供这组语义。包装层因此通过 `space.cordis.yml` 把官方 JSONL backend 指到容器本地 `/tmp/dsh-sessions`，启动前显式探测硬链接；Web UI、Agent preset 和工具保持上游实现。
+
+会话归档由 `scripts/session_archive.py` 负责：启动时先把 `/data/dsh/session-archive-v1` 的最新完整 manifest 恢复到 `/tmp/dsh-sessions`；运行中默认每 30 秒提交一次增量 manifest；收到 TERM 后等待 DSH 退出，再提交最终 manifest。chunk 和 manifest 都是 immutable 文件，恢复时校验 SHA-256、大小、连续 offset 和 DSH 版本，最新 manifest 损坏时回退到上一个完整版本。
 
 HF Bucket 可能把上游新建的 `.credentials.yaml` 呈现为 mode `0666`；官方 0.2.x 重启时会拒绝该权限。包装层在启动前和 readiness exchange 后都会把它限制为 `0600`，避免首次初始化后的下一次重启失败。
 
@@ -84,6 +87,13 @@ Secret:   ADMIN_PASSWORD
 `ADMIN_PASSWORD` 至少 16 个字符，只用于启动时在 `/tmp` 生成带随机 salt 的 Apache MD5 `htpasswd`；明文不会写入镜像、Git 或持久化 Bucket。该摘要格式是 Nginx 在 Debian 与本机验证环境都支持的兼容格式，入口 TLS 由 Hugging Face 终止。
 
 上游启动 token 只存在于当前容器进程和 `/tmp`，不写入 Git 或持久化 Bucket。外部入口仍先通过 Nginx Basic Auth；上游 cookie 的签名密据由 `$DSH_HOME/.credentials.yaml` 持久化管理。
+
+可选归档控制值：
+
+```text
+DSH_SESSION_ARCHIVE_INTERVAL_SECONDS=30   # 允许 5-3600
+DSH_SESSION_ARCHIVE_MAX_FAILURES=3        # 允许 1-10
+```
 
 本机部署控制值保存在被 Git 忽略且权限为 `0600` 的 `local/hfs-targets/production.env`。不要把该文件复制为仓库根 `.env`：上游会自动读取 workspace 的 `.env`，并按设计拒绝其中的 `DSH_*` 和网络启动变量。根目录 `.env.example` 只是键名模板。
 
@@ -106,7 +116,7 @@ sovereignty:    port
 lane:           artifact
 version_source: tag (npm package version)
 visibility:     protected Space / private bucket
-session store:  upstream JSONL backend at /tmp/dsh-sessions (container-local)
+session store:  upstream JSONL backend at /tmp/dsh-sessions + bucket archive
 ```
 
 ## 持久化约束
@@ -125,7 +135,9 @@ Space 必须将私有 Bucket 读写挂载到 `/data`。启动脚本以 UID/GID `
 ./scripts/prepare-bucket-prefix.sh --check
 ```
 
-不要让两个运行中的 Space 同时写同一个 `/data/dsh`。会话历史位于容器本地 `/tmp/dsh-sessions`，Space restart、rebuild 或休眠重建后会话历史不保留；Bucket 中的 `dsh/sessions.sqlite` 是旧版 SQLite 遗留文件，当前官方版本不会读取或迁移它。工作区、profile、设置和凭据文件仍走 `/data/dsh`。
+不要让两个运行中的 Space 同时写同一个 `/data/dsh`。会话运行时权威历史位于容器本地 `/tmp/dsh-sessions`，包装层把增量副本放入 `/data/dsh/session-archive-v1`；正常 restart、rebuild 和休眠重建会在下一次启动时恢复会话。若容器被强杀、OOM 或宿主突然故障，可能丢失最近一个归档周期内的会话增量，默认边界是 30 秒。归档连续失败达到 3 次时容器会失败退出，避免在未声明的状态下继续产生会话。
+
+Bucket 中的 `dsh/sessions.sqlite` 是旧版 SQLite 遗留文件，当前官方版本不会读取或迁移它。工作区、profile、设置和凭据文件仍直接走 `/data/dsh`。
 
 ## 本地验证
 
@@ -140,11 +152,12 @@ npx --no-install dsh --version
 ## 平台限制与验收边界
 
 - `cpu-basic` Space 空闲时会休眠，不适合作为无人值守的常驻 Agent。
-- 会话历史是容器本地临时数据；跨重启需要保留的产物必须放在 `/data/dsh/workspace`。
+- 会话归档覆盖正常重启；异常强杀仍可能丢失最近一个归档周期内的会话增量。
+- 会话归档按文件变化保留 immutable chunk 和 manifest，存储量会随会话写入增长。
 - Agent 的 Bash/文件能力运行在 Space 容器和 `/data/dsh/workspace` 内；没有宿主 Docker socket。
 - Protected Space 不能替代应用鉴权，实际入口保留 Basic Auth，上游 Web 进程保留官方 token/cookie 鉴权。
 - 当前上游仍是 developer preview，存在破坏性兼容变更；升级必须更新 npm pin、lockfile 并重新做构建与运行验证。
-- 没有 `DEEPSEEK_API_KEY` 时，只能验收构建、鉴权、Web UI 和临时会话存储，不能宣称真实模型推理完成。
+- 没有 `DEEPSEEK_API_KEY` 时，只能验收构建、鉴权、Web UI 和会话归档，不能宣称真实模型推理完成。
 
 ## License
 

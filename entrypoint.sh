@@ -9,6 +9,10 @@ readonly public_port="${PORT:-7860}"
 readonly trusted_host="${DSH_TRUSTED_HOST:-blueskyxn-dsh-all-in-one-hfs.hf.space}"
 readonly dsh_bin="/opt/dsh/node_modules/.bin/dsh"
 readonly session_root="/tmp/dsh-sessions"
+readonly session_archive="/opt/dsh-hfs/scripts/session_archive.py"
+readonly session_archive_root="${data_root}/session-archive-v1"
+readonly session_archive_interval="${DSH_SESSION_ARCHIVE_INTERVAL_SECONDS:-30}"
+readonly session_archive_max_failures="${DSH_SESSION_ARCHIVE_MAX_FAILURES:-3}"
 readonly space_overlay="/opt/dsh-hfs/space.cordis.yml"
 readonly nginx_auth_file="/tmp/dsh-nginx/htpasswd"
 readonly dsh_web_log="/tmp/dsh-nginx/dsh-web.log"
@@ -61,6 +65,33 @@ verify_credentials_permissions() {
   fi
 }
 
+restore_session_archive() {
+  python3 "${session_archive}" restore \
+    --archive "${session_archive_root}" \
+    --destination "${session_root}" \
+    || fail "cannot restore the session archive"
+}
+
+archive_existing_sessions() {
+  if [[ -d "${session_root}" ]] \
+    && [[ -n "$(find "${session_root}" -type f -print -quit 2>/dev/null)" ]]; then
+    python3 "${session_archive}" backup \
+      --source "${session_root}" \
+      --archive "${session_archive_root}" \
+      || fail "cannot archive existing container-local sessions"
+  fi
+}
+
+final_session_archive() {
+  if ! python3 "${session_archive}" backup \
+    --source "${session_root}" \
+    --archive "${session_archive_root}"; then
+    printf '[dsh-hfs] ERROR: final session archive backup failed\n' >&2
+    return 1
+  fi
+  printf '[dsh-hfs] final session archive backup committed\n'
+}
+
 terminate_children() {
   local pid
   for pid in "${children[@]:-}"; do
@@ -82,7 +113,10 @@ print_dsh_log_tail() {
 handle_signal() {
   trap - TERM INT
   terminate_children
-  exit 0
+  if final_session_archive; then
+    exit 0
+  fi
+  exit 1
 }
 
 trap handle_signal TERM INT
@@ -112,6 +146,14 @@ mountpoint -q /data \
   || fail "DSH_TRUSTED_HOST must be one bare host[:port] authority"
 [[ "${internal_port}" =~ ^[0-9]+$ && "${public_port}" =~ ^[0-9]+$ ]] \
   || fail "DSH_INTERNAL_PORT and PORT must be numeric"
+[[ "${session_archive_interval}" =~ ^[0-9]+$ ]] \
+  || fail "DSH_SESSION_ARCHIVE_INTERVAL_SECONDS must be numeric"
+[[ "${session_archive_interval}" -ge 5 && "${session_archive_interval}" -le 3600 ]] \
+  || fail "DSH_SESSION_ARCHIVE_INTERVAL_SECONDS must be between 5 and 3600"
+[[ "${session_archive_max_failures}" =~ ^[0-9]+$ ]] \
+  || fail "DSH_SESSION_ARCHIVE_MAX_FAILURES must be numeric"
+[[ "${session_archive_max_failures}" -ge 1 && "${session_archive_max_failures}" -le 10 ]] \
+  || fail "DSH_SESSION_ARCHIVE_MAX_FAILURES must be between 1 and 10"
 test "${internal_port}" = "3080" \
   || fail "DSH_INTERNAL_PORT must remain 3080"
 test "${public_port}" = "7860" \
@@ -121,6 +163,8 @@ umask 077
 mkdir -p \
   "${data_root}/home" \
   "${workspace}" \
+  "${session_archive_root}/manifests" \
+  "${session_archive_root}/chunks" \
   /tmp/dsh-cache \
   /tmp/npm-cache \
   /tmp/dsh-nginx/client_body \
@@ -130,6 +174,9 @@ mkdir -p \
   /tmp/dsh-nginx/scgi
 verify_writable_directory "${data_root}"
 verify_writable_directory "${workspace}"
+verify_writable_directory "${session_archive_root}"
+archive_existing_sessions
+restore_session_archive
 verify_session_store
 verify_credentials_permissions
 
@@ -198,13 +245,22 @@ nginx -c /etc/nginx/nginx.conf -g 'daemon off;' &
 nginx_pid=$!
 children+=("${nginx_pid}")
 
+python3 "${session_archive}" watch \
+  --source "${session_root}" \
+  --archive "${session_archive_root}" \
+  --interval "${session_archive_interval}" \
+  --max-failures "${session_archive_max_failures}" &
+archive_pid=$!
+children+=("${archive_pid}")
+
 set +e
-wait -n "${dsh_pid}" "${nginx_pid}"
+wait -n "${dsh_pid}" "${nginx_pid}" "${archive_pid}"
 status=$?
 set -e
 
 printf '[dsh-hfs] ERROR: a supervised process exited; stopping the container\n' >&2
 terminate_children
+final_session_archive || status=1
 print_dsh_log_tail
 if [[ "${status}" = "0" ]]; then
   exit 1

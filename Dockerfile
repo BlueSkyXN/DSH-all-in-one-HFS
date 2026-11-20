@@ -39,6 +39,8 @@ ENV NODE_ENV=production \
     DSH_WORKSPACE=/data/dsh/workspace \
     DSH_INTERNAL_PORT=3080 \
     DSH_TRUSTED_HOST=blueskyxn-dsh-all-in-one-hfs.hf.space \
+    DSH_SESSION_ARCHIVE_INTERVAL_SECONDS=30 \
+    DSH_SESSION_ARCHIVE_MAX_FAILURES=3 \
     HOME=/data/dsh/home \
     XDG_CACHE_HOME=/tmp/dsh-cache \
     NPM_CONFIG_CACHE=/tmp/npm-cache \
@@ -71,11 +73,13 @@ RUN apt-get update \
 
 COPY --from=dsh-build /opt/dsh /opt/dsh
 COPY space.cordis.yml /opt/dsh-hfs/space.cordis.yml
+COPY scripts/session_archive.py /opt/dsh-hfs/scripts/session_archive.py
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY entrypoint.sh /usr/local/bin/dsh-hfs-entrypoint
 
 RUN chmod 0644 /opt/dsh-hfs/space.cordis.yml /etc/nginx/nginx.conf \
     && chmod 0755 /usr/local/bin/dsh-hfs-entrypoint \
+    && chmod 0755 /opt/dsh-hfs/scripts/session_archive.py \
     && test "$(dsh --version)" = "${DSH_VERSION}"
 
 VOLUME ["/data"]
@@ -85,7 +89,7 @@ WORKDIR /data/dsh/workspace
 EXPOSE 7860
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
-    CMD ["curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3080/"]
+    CMD ["curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:7860/healthz"]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/dsh-hfs-entrypoint"]

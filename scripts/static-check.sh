@@ -7,6 +7,7 @@ cd "${root}"
 
 bash -n entrypoint.sh
 bash -n scripts/prepare-bucket-prefix.sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/session_archive.py self-test
 
 ROOT="${root}" python3 - <<'PY'
 import json
@@ -58,10 +59,14 @@ entrypoint = (root / "entrypoint.sh").read_text(encoding="utf-8")
 nginx = (root / "nginx.conf").read_text(encoding="utf-8")
 bucket_script = (root / "scripts/prepare-bucket-prefix.sh").read_text(encoding="utf-8")
 space_overlay = (root / "space.cordis.yml").read_text(encoding="utf-8")
+session_archive_script = (root / "scripts/session_archive.py").read_text(encoding="utf-8")
 
 for snippet in (
     "@deepseek-ai/dsh@${DSH_VERSION}",
     "DSH_HOME=/data/dsh",
+    "DSH_SESSION_ARCHIVE_INTERVAL_SECONDS=30",
+    "COPY scripts/session_archive.py /opt/dsh-hfs/scripts/session_archive.py",
+    'http://127.0.0.1:7860/healthz',
     "USER node",
     "EXPOSE 7860",
     '["/usr/bin/tini", "--"]',
@@ -77,6 +82,10 @@ for snippet in (
     'verify_writable_directory "${workspace}"',
     'verify_session_store',
     'verify_credentials_permissions',
+    'archive_existing_sessions',
+    'restore_session_archive',
+    'final_session_archive',
+    'python3 "${session_archive}" watch',
     '--patch "${space_overlay}"',
     '--no-open',
     'readonly launch_token_file="/tmp/dsh-nginx/launch-token.conf"',
@@ -116,6 +125,18 @@ for snippet in (
 ):
     if snippet not in space_overlay:
         raise SystemExit(f"space.cordis.yml is missing persistence contract: {snippet}")
+
+for snippet in (
+    "SCHEMA_VERSION = 1",
+    "def backup_once(",
+    "def restore_archive(",
+    "def watch(",
+    "verify_manifest_chunks(archive, manifest)",
+    "session source became empty; refusing to overwrite the archive",
+    "session source is missing files present in the latest archive",
+):
+    if snippet not in session_archive_script:
+        raise SystemExit(f"session_archive.py is missing archive contract: {snippet}")
 
 print("static contract: PASS")
 PY
