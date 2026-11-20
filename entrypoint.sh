@@ -14,6 +14,7 @@ readonly nginx_auth_file="/tmp/dsh-nginx/htpasswd"
 readonly dsh_web_log="/tmp/dsh-nginx/dsh-web.log"
 readonly launch_token_file="/tmp/dsh-nginx/launch-token.conf"
 readonly readiness_cookie_jar="/tmp/dsh-nginx/readiness-cookies.txt"
+readonly credentials_file="${data_root}/.credentials.yaml"
 
 children=()
 
@@ -49,6 +50,15 @@ verify_session_store() {
     || fail "cannot read back a hard-link probe from the session store"
   rm -- "${source_probe}" "${linked_probe}" \
     || fail "cannot remove session-store probes"
+}
+
+verify_credentials_permissions() {
+  if [[ -e "${credentials_file}" ]]; then
+    chmod 0600 "${credentials_file}" \
+      || fail "cannot restrict ${credentials_file} to its owner"
+    test "$(stat -c '%a' "${credentials_file}")" = "600" \
+      || fail "${credentials_file} must have mode 600"
+  fi
 }
 
 terminate_children() {
@@ -121,6 +131,7 @@ mkdir -p \
 verify_writable_directory "${data_root}"
 verify_writable_directory "${workspace}"
 verify_session_store
+verify_credentials_permissions
 
 printf '%s\n' "${ADMIN_PASSWORD}" \
   | htpasswd -imc "${nginx_auth_file}" "${ADMIN_USERNAME}" >/dev/null
@@ -179,6 +190,7 @@ fi
 printf '%s%s%s\n' 'set $dsh_launch_token ' "${launch_token}" ';' >"${launch_token_file}"
 chmod 0600 "${launch_token_file}"
 rm -f "${readiness_cookie_jar}"
+verify_credentials_permissions
 
 printf '[dsh-hfs] dsh is ready on loopback port %s; starting authenticated proxy on port %s\n' \
   "${internal_port}" "${public_port}"

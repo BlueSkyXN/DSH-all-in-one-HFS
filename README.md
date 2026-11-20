@@ -69,6 +69,8 @@ Nginx 保留外部 `Host`，并通过 `--trusted-host` 将唯一的 `hf.space` a
 
 官方 0.2.2 版本只提供 JSONL Session persistence backend，并已移除 SQLite 会话后端。Linux 上的 JSONL 首次发布依赖 POSIX `link()` 硬链接与目录 `fsync`；HF Bucket mount 不提供这组语义。包装层因此通过 `space.cordis.yml` 把官方 JSONL backend 指到容器本地 `/tmp/dsh-sessions`，启动前显式探测硬链接；Web UI、Agent preset 和工具保持上游实现。
 
+HF Bucket 可能把上游新建的 `.credentials.yaml` 呈现为 mode `0666`；官方 0.2.x 重启时会拒绝该权限。包装层在启动前和 readiness exchange 后都会把它限制为 `0600`，避免首次初始化后的下一次重启失败。
+
 ## Space 配置
 
 必需：

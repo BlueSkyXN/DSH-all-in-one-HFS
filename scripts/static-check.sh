@@ -76,6 +76,7 @@ for snippet in (
     'nginx -c /etc/nginx/nginx.conf',
     'verify_writable_directory "${workspace}"',
     'verify_session_store',
+    'verify_credentials_permissions',
     '--patch "${space_overlay}"',
     '--no-open',
     'readonly launch_token_file="/tmp/dsh-nginx/launch-token.conf"',
