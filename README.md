@@ -38,6 +38,8 @@ git tag:    dsh-v0.2.2-rc.5
 
 `package-lock.json` 固定所有传递依赖；Docker 构建使用 `npm ci`，并在镜像内校验 `dsh --version`。npm 元数据未给出可回读的 `gitHead`，因此本仓库只声明 npm 产物版本、完整性以及上游同名版本 tag，不把该 tag commit 表述为 npm tarball 的字节级来源。
 
+lockfile 保持同版本 Cordis/DSH peer 包去重。DSH 的 per-agent scope 使用模块内 Symbol；如果 `dsh-scope`、`dsh-system-prompt`、`dsh-commands` 等身份相关包被重复安装，preset 内的 `persona` 和 `/compact` 会被误判成全局重复注册，导致 `session/create` 失败。`scripts/static-check.sh` 会拒绝这类嵌套副本。
+
 ## 运行结构
 
 ```text

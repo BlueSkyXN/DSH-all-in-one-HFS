@@ -49,6 +49,33 @@ if dsh_lock.get("integrity") != "sha512-cNbp12tLYLUTXaVli7zwwMjzmmEVCD1PRldg4oKt
 if "@deepseek-ai/dsh-session-persistence-sqlite" in lock.get("packages", {}):
     raise SystemExit("package-lock.json still contains the removed SQLite persistence package")
 
+# DSH's scope identity is a module-local symbol. Multiple same-version copies of
+# these peer packages make preset-scoped registrations resolve as global and
+# break ordinary session creation with duplicate persona/command errors.
+scope_identity_packages = (
+    "dsh-scope",
+    "dsh-system-prompt",
+    "dsh-commands",
+    "dsh-agent",
+    "dsh-agent-preset-registry",
+    "dsh-agent-loop",
+    "dsh-api-session-controller",
+    "dsh-session",
+    "dsh-session-projection",
+    "dsh-tools",
+)
+for package_name in scope_identity_packages:
+    lock_path = f"node_modules/@deepseek-ai/{package_name}"
+    paths = [
+        path
+        for path in lock.get("packages", {})
+        if path == lock_path or path.endswith(f"/node_modules/@deepseek-ai/{package_name}")
+    ]
+    if paths != [lock_path]:
+        raise SystemExit(
+            f"package-lock.json must keep one hoisted copy of {lock_path}; found: {', '.join(paths) or 'none'}"
+        )
+
 readme = (root / "README.md").read_text(encoding="utf-8")
 for line in ("sdk: docker", "app_port: 7860", "license: gpl-3.0"):
     if line not in readme:
