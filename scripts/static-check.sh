@@ -35,25 +35,18 @@ for key, value in expected_manifest.items():
 
 package = json.loads((root / "package.json").read_text(encoding="utf-8"))
 lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
-expected_version = "0.1.0-rc.6"
+expected_version = "0.2.2-rc.5"
 if package.get("dependencies", {}).get("@deepseek-ai/dsh") != expected_version:
     raise SystemExit("package.json does not pin the expected dsh version")
-if package.get("dependencies", {}).get("@deepseek-ai/dsh-session-persistence-sqlite") != expected_version:
-    raise SystemExit("package.json does not pin the expected SQLite persistence version")
 if lock.get("packages", {}).get("", {}).get("dependencies", {}).get("@deepseek-ai/dsh") != expected_version:
     raise SystemExit("package-lock.json does not pin the expected dsh version")
-if lock.get("packages", {}).get("", {}).get("dependencies", {}).get("@deepseek-ai/dsh-session-persistence-sqlite") != expected_version:
-    raise SystemExit("package-lock.json does not pin the expected SQLite persistence version")
 dsh_lock = lock.get("packages", {}).get("node_modules/@deepseek-ai/dsh", {})
 if dsh_lock.get("version") != expected_version:
     raise SystemExit("package-lock.json resolved an unexpected dsh version")
-if dsh_lock.get("integrity") != "sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==":
+if dsh_lock.get("integrity") != "sha512-cNbp12tLYLUTXaVli7zwwMjzmmEVCD1PRldg4oKtXM4+lFYckcaliMS2PU/FoThB4iAN/fKOSID0nrtRZU4Gjw==":
     raise SystemExit("package-lock.json resolved an unexpected dsh integrity")
-sqlite_lock = lock.get("packages", {}).get("node_modules/@deepseek-ai/dsh-session-persistence-sqlite", {})
-if sqlite_lock.get("version") != expected_version:
-    raise SystemExit("package-lock.json resolved an unexpected SQLite persistence version")
-if sqlite_lock.get("integrity") != "sha512-0pHni+hKe+VkZiuEieCmetcZQJd7gaA6Iw1qp3yMH6T904r2AuzqjQDU4yAJfKErMTbstvcR2vIdMw89CScFdQ==":
-    raise SystemExit("package-lock.json resolved an unexpected SQLite persistence integrity")
+if "@deepseek-ai/dsh-session-persistence-sqlite" in lock.get("packages", {}):
+    raise SystemExit("package-lock.json still contains the removed SQLite persistence package")
 
 readme = (root / "README.md").read_text(encoding="utf-8")
 for line in ("sdk: docker", "app_port: 7860", "license: gpl-3.0"):
@@ -82,15 +75,24 @@ for snippet in (
     'htpasswd -imc',
     'nginx -c /etc/nginx/nginx.conf',
     'verify_writable_directory "${workspace}"',
+    'verify_session_store',
     '--patch "${space_overlay}"',
-    'ln -s "${sqlite_plugin}" "${sqlite_plugin_link}"',
+    '--no-open',
+    'readonly launch_token_file="/tmp/dsh-nginx/launch-token.conf"',
+    's#([?&]token=)[A-Za-z0-9_-]+#\\1<redacted>#g',
 ):
     if snippet not in entrypoint:
         raise SystemExit(f"entrypoint.sh is missing runtime contract: {snippet}")
 
 for snippet in (
     'listen 7860;',
+    'listen 127.0.0.1:7861;',
+    'log_format dsh_hfs',
+    '"$request_method $uri $server_protocol"',
+    'include /tmp/dsh-nginx/launch-token.conf;',
     'auth_basic "DeepSeek Harness";',
+    'error_page 401 = @dsh_launch;',
+    'return 302 "/?token=${dsh_launch_token}";',
     'proxy_pass http://127.0.0.1:3080;',
     'proxy_set_header Host $http_host;',
     'proxy_buffering off;',
@@ -107,12 +109,8 @@ for snippet in (
         raise SystemExit(f"prepare-bucket-prefix.sh is missing seed path: {snippet}")
 
 for snippet in (
-    "id: session-persistence-jsonl",
-    "disabled: true",
-    "id: session-persistence-sqlite",
-    "name: '@deepseek-ai/dsh-session-persistence-sqlite'",
-    "path: !!js dshHomePath('sessions.sqlite')",
-    "journalMode: wal",
+    "- id: session-persistence-jsonl",
+    "root: /tmp/dsh-sessions",
 ):
     if snippet not in space_overlay:
         raise SystemExit(f"space.cordis.yml is missing persistence contract: {snippet}")

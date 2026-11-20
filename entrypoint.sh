@@ -8,10 +8,12 @@ readonly internal_port="${DSH_INTERNAL_PORT:-3080}"
 readonly public_port="${PORT:-7860}"
 readonly trusted_host="${DSH_TRUSTED_HOST:-blueskyxn-dsh-all-in-one-hfs.hf.space}"
 readonly dsh_bin="/opt/dsh/node_modules/.bin/dsh"
-readonly sqlite_plugin="/opt/dsh/node_modules/@deepseek-ai/dsh-session-persistence-sqlite"
-readonly sqlite_plugin_link="${data_root}/profiles/node_modules/@deepseek-ai/dsh-session-persistence-sqlite"
+readonly session_root="/tmp/dsh-sessions"
 readonly space_overlay="/opt/dsh-hfs/space.cordis.yml"
 readonly nginx_auth_file="/tmp/dsh-nginx/htpasswd"
+readonly dsh_web_log="/tmp/dsh-nginx/dsh-web.log"
+readonly launch_token_file="/tmp/dsh-nginx/launch-token.conf"
+readonly readiness_cookie_jar="/tmp/dsh-nginx/readiness-cookies.txt"
 
 children=()
 
@@ -33,6 +35,22 @@ verify_writable_directory() {
   rm -- "${probe}" || fail "cannot remove a write probe from ${directory}"
 }
 
+verify_session_store() {
+  local source_probe="${session_root}/.hfs-link-source-${BASHPID}-${RANDOM}"
+  local linked_probe="${session_root}/.hfs-link-target-${BASHPID}-${RANDOM}"
+  local payload="dsh-hfs-link-probe"
+
+  mkdir -p "${session_root}" || fail "cannot create the container-local session store"
+  printf '%s\n' "${payload}" >"${source_probe}" \
+    || fail "cannot write to the container-local session store"
+  ln "${source_probe}" "${linked_probe}" \
+    || fail "the container-local session store does not support hard links"
+  test "$(tr -d '\r\n' <"${linked_probe}")" = "${payload}" \
+    || fail "cannot read back a hard-link probe from the session store"
+  rm -- "${source_probe}" "${linked_probe}" \
+    || fail "cannot remove session-store probes"
+}
+
 terminate_children() {
   local pid
   for pid in "${children[@]:-}"; do
@@ -41,6 +59,13 @@ terminate_children() {
   for pid in "${children[@]:-}"; do
     wait "${pid}" 2>/dev/null || true
   done
+}
+
+print_dsh_log_tail() {
+  if [[ -f "${dsh_web_log}" ]]; then
+    tail -n 100 "${dsh_web_log}" \
+      | sed -E 's#([?&]token=)[A-Za-z0-9_-]+#\1<redacted>#g' >&2 || true
+  fi
 }
 
 # shellcheck disable=SC2329  # Invoked by the TERM/INT trap below.
@@ -55,7 +80,6 @@ trap handle_signal TERM INT
 test "$(id -u)" = "${expected_uid}" \
   || fail "runtime UID must be ${expected_uid} on Hugging Face Spaces"
 test -x "${dsh_bin}" || fail "the pinned dsh executable is missing"
-test -d "${sqlite_plugin}" || fail "the pinned SQLite persistence plugin is missing"
 test -f "${space_overlay}" || fail "the HFS deployment overlay is missing"
 test "$(${dsh_bin} --version)" = "${DSH_VERSION}" \
   || fail "installed dsh version does not match DSH_VERSION=${DSH_VERSION}"
@@ -96,17 +120,7 @@ mkdir -p \
   /tmp/dsh-nginx/scgi
 verify_writable_directory "${data_root}"
 verify_writable_directory "${workspace}"
-
-mkdir -p "$(dirname -- "${sqlite_plugin_link}")"
-if [[ -L "${sqlite_plugin_link}" ]]; then
-  test "$(readlink "${sqlite_plugin_link}")" = "${sqlite_plugin}" \
-    || fail "the SQLite persistence plugin link points outside the pinned install"
-elif [[ -e "${sqlite_plugin_link}" ]]; then
-  fail "the SQLite persistence plugin link path is occupied by a non-symlink"
-else
-  ln -s "${sqlite_plugin}" "${sqlite_plugin_link}" \
-    || fail "cannot expose the SQLite persistence plugin to the Web profile"
-fi
+verify_session_store
 
 printf '%s\n' "${ADMIN_PASSWORD}" \
   | htpasswd -imc "${nginx_auth_file}" "${ADMIN_USERNAME}" >/dev/null
@@ -122,28 +136,49 @@ cd "${workspace}"
 
 "${dsh_bin}" web \
   --patch "${space_overlay}" \
+  --no-open \
   --port "${internal_port}" \
-  --trusted-host "${trusted_host}" &
+  --trusted-host "${trusted_host}" \
+  >"${dsh_web_log}" 2>&1 &
 dsh_pid=$!
 children+=("${dsh_pid}")
 
 ready=0
+launch_token=""
 for _ in $(seq 1 180); do
-  if curl -fsS -o /dev/null "http://127.0.0.1:${internal_port}/"; then
-    ready=1
-    break
+  if [[ -z "${launch_token}" && -s "${dsh_web_log}" ]]; then
+    launch_token_line="$(tail -n 20 "${dsh_web_log}" | grep -F 'dsh web: ' | tail -n 1 || true)"
+    if [[ "${launch_token_line}" =~ \?token=([A-Za-z0-9_-]+) ]]; then
+      launch_token="${BASH_REMATCH[1]}"
+    fi
+  fi
+  if [[ -n "${launch_token}" ]]; then
+    if curl -fsS -L \
+      -c "${readiness_cookie_jar}" -b "${readiness_cookie_jar}" \
+      -o /dev/null \
+      "http://127.0.0.1:${internal_port}/?token=${launch_token}"; then
+      ready=1
+      break
+    fi
   fi
   if ! kill -0 "${dsh_pid}" 2>/dev/null; then
     wait "${dsh_pid}" || true
-    fail "dsh exited before its loopback Web UI became ready"
+    sed -E 's#([?&]token=)[A-Za-z0-9_-]+#\1<redacted>#g' "${dsh_web_log}" >&2 || true
+    fail "dsh exited before its authenticated Web UI became ready"
   fi
   sleep 1
 done
 
 if [[ "${ready}" != "1" ]]; then
   terminate_children
-  fail "dsh did not become ready within 180 seconds"
+  sed -E 's#([?&]token=)[A-Za-z0-9_-]+#\1<redacted>#g' "${dsh_web_log}" >&2 || true
+  fail "dsh did not pass the authenticated readiness exchange within 180 seconds"
 fi
+
+# shellcheck disable=SC2016  # This is an Nginx variable, not a shell variable.
+printf '%s%s%s\n' 'set $dsh_launch_token ' "${launch_token}" ';' >"${launch_token_file}"
+chmod 0600 "${launch_token_file}"
+rm -f "${readiness_cookie_jar}"
 
 printf '[dsh-hfs] dsh is ready on loopback port %s; starting authenticated proxy on port %s\n' \
   "${internal_port}" "${public_port}"
@@ -158,6 +193,7 @@ set -e
 
 printf '[dsh-hfs] ERROR: a supervised process exited; stopping the container\n' >&2
 terminate_children
+print_dsh_log_tail
 if [[ "${status}" = "0" ]]; then
   exit 1
 fi

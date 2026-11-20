@@ -2,7 +2,7 @@
 
 FROM node:24-bookworm-slim AS dsh-build
 
-ARG DSH_VERSION=0.1.0-rc.6
+ARG DSH_VERSION=0.2.2-rc.5
 
 ENV XDG_CACHE_HOME=/tmp/dsh-build-cache \
     NPM_CONFIG_CACHE=/tmp/npm-cache \
@@ -24,7 +24,7 @@ RUN apt-get update \
 
 FROM node:24-bookworm-slim
 
-ARG DSH_VERSION=0.1.0-rc.6
+ARG DSH_VERSION=0.2.2-rc.5
 
 LABEL org.opencontainers.image.title="DeepSeek Harness All-in-One for Hugging Face Spaces" \
       org.opencontainers.image.source="https://github.com/BlueSkyXN/DSH-all-in-one-HFS" \
