@@ -88,6 +88,7 @@ for snippet in (
 for snippet in (
     'listen 7860;',
     'listen 127.0.0.1:7861;',
+    'absolute_redirect off;',
     'log_format dsh_hfs',
     '"$request_method $uri $server_protocol"',
     'include /tmp/dsh-nginx/launch-token.conf;',

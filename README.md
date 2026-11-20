@@ -61,7 +61,7 @@ dsh web 127.0.0.1:3080
 
 上游 CLI 会主动拒绝 `dsh web --host 0.0.0.0`，因为 Web Surface 可创建带 Bash 和文件工具的 Agent，直接暴露会形成远程代码执行入口。包装层因此保留上游 `127.0.0.1:3080` 监听，在前面增加一个必须通过 Basic Auth 的 Nginx 入口；WebSocket、SSE 和长请求经同一入口转发。
 
-官方 0.2.2 Web 进程还会生成进程级启动 token，并把未认证的根路径返回为 `401`。启动脚本从进程输出捕获该 token，只在 `/tmp` 生成给内层 Nginx 的跳转配置；外层 Nginx 先完成 Basic Auth，内层 Nginx 再把浏览器带到上游 token exchange，完成后由上游签发 HttpOnly 会话 cookie。启动失败日志会先遮蔽 token。
+官方 0.2.2 Web 进程还会生成进程级启动 token，并把未认证的根路径返回为 `401`。启动脚本从进程输出捕获该 token，只在 `/tmp` 生成给内层 Nginx 的跳转配置；外层 Nginx 先完成 Basic Auth，内层 Nginx 再以相对 `Location` 把浏览器带到上游 token exchange，完成后由上游签发 HttpOnly 会话 cookie。启动失败日志会先遮蔽 token。
 
 Nginx 保留外部 `Host`，并通过 `--trusted-host` 将唯一的 `hf.space` authority 交给上游 DNS-rebinding / same-origin 防护。包装层不会重写 `Host`、`Origin` 或 `Referer` 去绕过上游的远程限制。
 
