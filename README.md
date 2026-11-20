@@ -74,6 +74,8 @@ Nginx 保留外部 `Host`，并通过 `--trusted-host` 将唯一的 `hf.space` a
 
 会话归档由 `scripts/session_archive.py` 负责：启动时先把 `/data/dsh/session-archive-v1` 的最新完整 manifest 恢复到 `/tmp/dsh-sessions`；运行中默认每 30 秒提交一次增量 manifest；收到 TERM 后等待 DSH 退出，再提交最终 manifest。chunk 和 manifest 都是 immutable 文件，恢复时校验 SHA-256、大小、连续 offset 和 DSH 版本，最新 manifest 损坏时回退到上一个完整版本。
 
+归档默认是可用性优先：归档读取或写入失败时记录告警并继续重试，不阻止 Web 启动或退出运行中的容器。若把 `DSH_SESSION_ARCHIVE_MAX_FAILURES` 设为 `1-10`，包装层会回到严格模式；连续归档失败达到阈值时启动、运行或停止会失败。
+
 HF Bucket 可能把上游新建的 `.credentials.yaml` 呈现为 mode `0666`；官方 0.2.x 重启时会拒绝该权限。包装层在启动前和 readiness exchange 后都会把它限制为 `0600`，避免首次初始化后的下一次重启失败。
 
 ## Space 配置
@@ -94,7 +96,7 @@ Secret:   ADMIN_PASSWORD
 
 ```text
 DSH_SESSION_ARCHIVE_INTERVAL_SECONDS=30   # 允许 5-3600
-DSH_SESSION_ARCHIVE_MAX_FAILURES=3        # 允许 1-10
+DSH_SESSION_ARCHIVE_MAX_FAILURES=0        # 0 表示无限重试；严格模式允许 1-10
 ```
 
 本机部署控制值保存在被 Git 忽略且权限为 `0600` 的 `local/hfs-targets/production.env`。不要把该文件复制为仓库根 `.env`：上游会自动读取 workspace 的 `.env`，并按设计拒绝其中的 `DSH_*` 和网络启动变量。根目录 `.env.example` 只是键名模板。
@@ -137,7 +139,7 @@ Space 必须将私有 Bucket 读写挂载到 `/data`。启动脚本以 UID/GID `
 ./scripts/prepare-bucket-prefix.sh --check
 ```
 
-不要让两个运行中的 Space 同时写同一个 `/data/dsh`。会话运行时权威历史位于容器本地 `/tmp/dsh-sessions`，包装层把增量副本放入 `/data/dsh/session-archive-v1`；正常 restart、rebuild 和休眠重建会在下一次启动时恢复会话。若容器被强杀、OOM 或宿主突然故障，可能丢失最近一个归档周期内的会话增量，默认边界是 30 秒。归档连续失败达到 3 次时容器会失败退出，避免在未声明的状态下继续产生会话。
+不要让两个运行中的 Space 同时写同一个 `/data/dsh`。会话运行时权威历史位于容器本地 `/tmp/dsh-sessions`，包装层把增量副本放入 `/data/dsh/session-archive-v1`；正常 restart、rebuild 和休眠重建会在下一次启动时恢复会话。若容器被强杀、OOM、宿主突然故障，或归档处于默认的可用性优先失败状态，可能只保留到最后一个成功 manifest，最近一个成功归档之后的会话增量会丢失，默认重试周期是 30 秒。
 
 Bucket 中的 `dsh/sessions.sqlite` 是旧版 SQLite 遗留文件，当前官方版本不会读取或迁移它。工作区、profile、设置和凭据文件仍直接走 `/data/dsh`。
 

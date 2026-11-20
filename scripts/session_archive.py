@@ -56,6 +56,16 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return parsed
+
+
 def safe_relative(path: str) -> PurePosixPath:
     candidate = PurePosixPath(path)
     if candidate.is_absolute() or ".." in candidate.parts or not candidate.parts:
@@ -484,12 +494,13 @@ def watch(source: Path, archive: Path, interval: int, max_failures: int) -> None
             failures = 0
         except Exception as error:
             failures += 1
+            limit = "unlimited" if max_failures == 0 else str(max_failures)
             print(
-                f"[dsh-hfs] session archive error ({failures}/{max_failures}): {error}",
+                f"[dsh-hfs] session archive error ({failures}/{limit}): {error}",
                 file=sys.stderr,
                 flush=True,
             )
-            if failures >= max_failures:
+            if max_failures > 0 and failures >= max_failures:
                 raise ArchiveError("session archive failure limit reached") from error
 
 
@@ -587,7 +598,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     watch_parser = subparsers.add_parser("watch", help="archive the session store until SIGTERM")
     add_path_arguments(watch_parser)
     watch_parser.add_argument("--interval", type=positive_int, default=30)
-    watch_parser.add_argument("--max-failures", type=positive_int, default=3)
+    watch_parser.add_argument("--max-failures", type=nonnegative_int, default=0)
 
     subparsers.add_parser("self-test", help="run built-in archive consistency checks")
     return parser.parse_args(list(argv) if argv is not None else None)

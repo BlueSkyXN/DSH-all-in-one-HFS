@@ -92,6 +92,7 @@ for snippet in (
     "@deepseek-ai/dsh@${DSH_VERSION}",
     "DSH_HOME=/data/dsh",
     "DSH_SESSION_ARCHIVE_INTERVAL_SECONDS=30",
+    "DSH_SESSION_ARCHIVE_MAX_FAILURES=0",
     "COPY scripts/session_archive.py /opt/dsh-hfs/scripts/session_archive.py",
     'http://127.0.0.1:7860/healthz',
     "USER node",
@@ -112,6 +113,7 @@ for snippet in (
     'archive_existing_sessions',
     'restore_session_archive',
     'final_session_archive',
+    'between 0 and 10',
     'python3 "${session_archive}" watch',
     '--patch "${space_overlay}"',
     '--no-open',
@@ -155,9 +157,11 @@ for snippet in (
 
 for snippet in (
     "SCHEMA_VERSION = 1",
+    "def nonnegative_int(",
     "def backup_once(",
     "def restore_archive(",
     "def watch(",
+    "if max_failures > 0 and failures >= max_failures:",
     "verify_manifest_chunks(archive, manifest)",
     "session source became empty; refusing to overwrite the archive",
     "session source is missing files present in the latest archive",
